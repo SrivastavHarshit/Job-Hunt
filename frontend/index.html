@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Job Hunt Agent</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0a0a0f; --surface:#12121a; --card:#1a1a26; --border:#2a2a3d;
+    --accent:#6c63ff; --accent2:#00d4aa; --accent3:#ff6b6b;
+    --text:#e8e8f0; --muted:#7a7a9a; --warn:#ffb347;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Space Grotesk',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+  body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(108,99,255,.03)1px,transparent 1px),linear-gradient(90deg,rgba(108,99,255,.03)1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+  .wrap{max-width:980px;margin:0 auto;padding:2rem 1.5rem;position:relative;z-index:1}
+
+  /* ── Header ── */
+  header{text-align:center;padding:2.5rem 0 1.5rem}
+  .badge{display:inline-flex;align-items:center;gap:8px;background:rgba(108,99,255,.12);border:1px solid rgba(108,99,255,.3);border-radius:100px;padding:5px 14px;font-size:11px;color:#a09aff;letter-spacing:.08em;text-transform:uppercase;margin-bottom:1.2rem}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.4)}}
+  h1{font-size:clamp(1.8rem,4vw,3rem);font-weight:700;line-height:1.1;margin-bottom:.6rem}
+  h1 span{background:linear-gradient(135deg,#6c63ff,#00d4aa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .sub{color:var(--muted);font-size:1rem;font-weight:300}
+
+  /* ── Stats ── */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border-radius:16px;overflow:hidden;border:1px solid var(--border);margin:1.5rem 0}
+  .stat{background:var(--card);padding:1.1rem;text-align:center}
+  .stat-v{font-size:1.7rem;font-weight:700;font-family:'JetBrains Mono',monospace}
+  .stat-v.a{color:var(--accent)}.stat-v.b{color:var(--accent2)}.stat-v.c{color:var(--warn)}
+  .stat-l{font-size:.7rem;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.06em}
+
+  /* ── Card ── */
+  .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:1.6rem;margin-bottom:1.1rem}
+  .card-title{font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:1.2rem;display:flex;align-items:center;gap:8px}
+  .card-title::after{content:'';flex:1;height:1px;background:var(--border)}
+
+  /* ── Form ── */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+  @media(max-width:600px){.grid2{grid-template-columns:1fr}}
+  label{font-size:.8rem;color:var(--muted);display:block;margin-bottom:5px}
+  input,select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 13px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:.88rem;transition:border-color .2s}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  select option{background:var(--surface)}
+
+  /* ── Tags ── */
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .tag{display:inline-flex;align-items:center;gap:5px;background:rgba(108,99,255,.12);border:1px solid rgba(108,99,255,.25);color:#a09aff;border-radius:100px;padding:3px 10px;font-size:.78rem;cursor:pointer;transition:all .2s}
+  .tag:hover{background:rgba(255,107,107,.15);border-color:var(--accent3);color:var(--accent3)}
+
+  /* ── Toggle ── */
+  .trow{display:flex;align-items:center;justify-content:space-between;padding:.7rem 0;border-bottom:1px solid var(--border)}
+  .trow:last-child{border-bottom:none}
+  .tlab{font-size:.88rem}.tdesc{font-size:.76rem;color:var(--muted);margin-top:2px}
+  .tog{position:relative;width:42px;height:22px;background:var(--border);border-radius:100px;cursor:pointer;transition:background .2s;flex-shrink:0}
+  .tog.on{background:var(--accent)}
+  .tog::after{content:'';position:absolute;width:16px;height:16px;background:white;border-radius:50%;top:3px;left:3px;transition:transform .2s}
+  .tog.on::after{transform:translateX(20px)}
+
+  /* ── Buttons ── */
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:10px 20px;border-radius:10px;font-family:'Space Grotesk',sans-serif;font-size:.88rem;font-weight:600;cursor:pointer;border:none;transition:all .2s;text-decoration:none}
+  .btn-p{background:linear-gradient(135deg,var(--accent),#8b85ff);color:white}
+  .btn-p:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(108,99,255,.35)}
+  .btn-s{background:var(--surface);border:1px solid var(--border);color:var(--text)}
+  .btn-s:hover{border-color:var(--accent);color:var(--accent)}
+  .btn-d{background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.25);color:var(--accent3)}
+  .btn-d:hover{background:rgba(255,107,107,.2)}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:1.2rem}
+
+  /* ── Status pill ── */
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:100px;font-size:.75rem;font-weight:500}
+  .pill-run{background:rgba(0,212,170,.1);color:var(--accent2);border:1px solid rgba(0,212,170,.25)}
+  .pill-idle{background:rgba(122,122,154,.1);color:var(--muted);border:1px solid var(--border)}
+  .pill-err{background:rgba(255,107,107,.1);color:var(--accent3);border:1px solid rgba(255,107,107,.25)}
+
+  /* ── Timer ── */
+  .timer{font-family:'JetBrains Mono',monospace;font-size:2.6rem;font-weight:500;color:var(--accent2);text-align:center;padding:1.2rem 0;letter-spacing:.05em}
+  .timer-sub{text-align:center;font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-top:-.4rem}
+  .bar-wrap{background:var(--border);border-radius:100px;height:4px;margin:.9rem 0;overflow:hidden}
+  .bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:100px;transition:width .4s ease;width:0%}
+
+  /* ── Tabs ── */
+  .tabs{display:flex;gap:3px;background:var(--surface);border-radius:10px;padding:3px;margin-bottom:1.1rem;border:1px solid var(--border)}
+  .tab{flex:1;padding:7px;text-align:center;border-radius:7px;cursor:pointer;font-size:.8rem;color:var(--muted);transition:all .2s}
+  .tab.on{background:var(--card);color:var(--text);border:1px solid var(--border)}
+
+  /* ── Job cards ── */
+  .job-card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:1.1rem;margin-bottom:.7rem;transition:border-color .2s}
+  .job-card:hover{border-color:rgba(108,99,255,.4)}
+  .job-title{font-size:.95rem;font-weight:600;margin-bottom:3px}
+  .job-co{font-size:.83rem;color:var(--accent2)}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+  .chip{font-size:.72rem;padding:2px 9px;border-radius:100px;background:var(--card);border:1px solid var(--border);color:var(--muted)}
+  .chip.hot{background:rgba(0,212,170,.07);border-color:rgba(0,212,170,.2);color:var(--accent2)}
+  .chip.kw{background:rgba(108,99,255,.07);border-color:rgba(108,99,255,.2);color:#a09aff}
+  .fresh{font-size:.7rem;color:var(--warn);white-space:nowrap}
+
+  /* ── Log ── */
+  .log{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.9rem;font-family:'JetBrains Mono',monospace;font-size:.76rem;max-height:220px;overflow-y:auto;line-height:1.7}
+  .le{display:flex;gap:10px}
+  .lt{color:var(--muted);flex-shrink:0}
+  .lm{color:var(--text)}.lm.ok{color:var(--accent2)}.lm.err{color:var(--accent3)}.lm.info{color:var(--accent)}
+
+  /* ── Spinner ── */
+  .spin{width:17px;height:17px;border:2px solid rgba(255,255,255,.2);border-top-color:white;border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* ── Notice ── */
+  .notice{background:rgba(255,179,71,.07);border:1px solid rgba(255,179,71,.2);border-radius:10px;padding:.9rem 1.1rem;font-size:.8rem;color:var(--warn);display:flex;gap:9px;margin-bottom:1rem}
+
+  /* ── Empty ── */
+  .empty{text-align:center;padding:2.5rem 1rem;color:var(--muted)}
+  .empty-icon{font-size:2.2rem;margin-bottom:.8rem}
+
+  /* ── Run history ── */
+  .run-row{display:flex;justify-content:space-between;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--border);font-size:.82rem}
+  .run-row:last-child{border-bottom:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="badge"><div class="dot"></div> Real Backend Agent</div>
+    <h1>Python & AI <span>Job Hunt</span> Agent</h1>
+    <p class="sub">FastAPI backend · SQLite DB · APScheduler · Claude web search · Gmail SMTP</p>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-v a" id="s-jobs">0</div><div class="stat-l">Jobs Found</div></div>
+    <div class="stat"><div class="stat-v b" id="s-emails">0</div><div class="stat-l">Emails Sent</div></div>
+    <div class="stat"><div class="stat-v c" id="s-runs">0</div><div class="stat-l">Searches Run</div></div>
+    <div class="stat">
+      <div class="stat-v" style="font-size:.95rem;padding-top:6px">
+        <span class="pill pill-idle" id="status-pill">● Idle</span>
+      </div>
+      <div class="stat-l">Agent Status</div>
+    </div>
+  </div>
+
+  <!-- Config -->
+  <div class="card">
+    <div class="card-title">⚙ Configuration</div>
+    <div class="notice">
+      <span>⚠</span>
+      <div>
+        <strong>Backend must be running</strong> at <code style="color:var(--accent2)">http://localhost:8000</code>.
+        See README for setup. Gmail SMTP uses an
+        <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--warn)">App Password</a>, not your Gmail password.
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <label>Anthropic API Key</label>
+        <input type="password" id="cfg-apikey" placeholder="sk-ant-..." />
+      </div>
+      <div>
+        <label>Send Job Alerts To (email)</label>
+        <input type="email" id="cfg-emailto" placeholder="you@gmail.com" />
+      </div>
+      <div>
+        <label>Gmail SMTP User (your Gmail address)</label>
+        <input type="email" id="cfg-smtpuser" placeholder="yourname@gmail.com" />
+      </div>
+      <div>
+        <label>Gmail App Password</label>
+        <input type="password" id="cfg-smtppass" placeholder="xxxx xxxx xxxx xxxx" />
+      </div>
+      <div>
+        <label>Search Interval</label>
+        <select id="cfg-interval">
+          <option value="2">Every 2 hours (recommended)</option>
+          <option value="1">Every 1 hour</option>
+          <option value="4">Every 4 hours</option>
+          <option value="24">Daily</option>
+          <option value="0.016">Every 1 minute (testing)</option>
+        </select>
+      </div>
+      <div>
+        <label>Experience Level</label>
+        <select id="cfg-exp">
+          <option value="1 year">1 year (junior/entry-level)</option>
+          <option value="0-2 years">0–2 years (fresher/junior)</option>
+          <option value="2-3 years">2–3 years (mid-level)</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-top:1rem">
+      <label>Job Keywords (Enter to add)</label>
+      <input type="text" id="kw-input" placeholder="e.g. LangChain, FastAPI, NLP..." />
+      <div class="tags" id="kw-tags"></div>
+    </div>
+    <div style="margin-top:1rem">
+      <label>Locations (Enter to add — leave empty for remote)</label>
+      <input type="text" id="loc-input" placeholder="e.g. Bangalore, Mumbai, Remote..." />
+      <div class="tags" id="loc-tags"></div>
+    </div>
+
+    <div style="margin-top:1.4rem">
+      <div class="card-title">Filters</div>
+      <div class="trow">
+        <div><div class="tlab">Remote Jobs Only</div><div class="tdesc">Filter for remote/WFH positions</div></div>
+        <div class="tog" id="tog-remote" onclick="this.classList.toggle('on')"></div>
+      </div>
+      <div class="trow">
+        <div><div class="tlab">Include Internships</div><div class="tdesc">Show internship / contract roles</div></div>
+        <div class="tog on" id="tog-intern" onclick="this.classList.toggle('on')"></div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-p" onclick="saveConfig()">💾 Save Config</button>
+      <button class="btn btn-p" id="start-btn" onclick="startAgent()">▶ Start Agent</button>
+      <button class="btn btn-d" id="stop-btn" onclick="stopAgent()" style="display:none">■ Stop Agent</button>
+      <button class="btn btn-s" onclick="runNow()">⚡ Run Once Now</button>
+    </div>
+  </div>
+
+  <!-- Timer -->
+  <div class="card" id="timer-card" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <span style="font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)">⏱ Next Search</span>
+      <span class="pill pill-run">● Running</span>
+    </div>
+    <div class="timer" id="countdown">02:00:00</div>
+    <div class="timer-sub">Next internet search</div>
+    <div class="bar-wrap"><div class="bar" id="bar"></div></div>
+    <div style="font-size:.78rem;color:var(--muted);text-align:center" id="next-label"></div>
+  </div>
+
+  <!-- Results -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:8px">
+      <span style="font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)">🔍 Results</span>
+      <span id="search-spin" style="display:none"><div class="spin"></div></span>
+    </div>
+
+    <div class="tabs">
+      <div class="tab on" onclick="tab('jobs',this)">Jobs</div>
+      <div class="tab" onclick="tab('runs',this)">Run History</div>
+      <div class="tab" onclick="tab('log',this)">Activity Log</div>
+    </div>
+
+    <div id="pane-jobs">
+      <div style="text-align:right;margin-bottom:.6rem">
+        <button class="btn btn-d" style="padding:5px 12px;font-size:.78rem" onclick="clearJobs()">🗑 Clear all jobs</button>
+      </div>
+      <div class="empty" id="empty-jobs"><div class="empty-icon">🤖</div>No jobs yet — press Run Now or Start Agent</div>
+      <div id="job-list"></div>
+    </div>
+
+    <div id="pane-runs" style="display:none">
+      <div id="run-list"><div class="empty"><div class="empty-icon">📋</div>No runs yet</div></div>
+    </div>
+
+    <div id="pane-log" style="display:none">
+      <div class="log" id="log-box">
+        <div class="le"><span class="lt">--:--:--</span><span class="lm info">Frontend connected. Configure and press Start.</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = 'http://localhost:8000/api';
+let kws = ['Python','Machine Learning','AI','Data Science'];
+let locs = [];
+let intervalSec = 7200;
+let nextRunAt = null;
+let countdownTimer = null;
+let pollTimer = null;
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+window.onload = async () => {
+  renderTags();
+  setupInputs();
+  await loadConfig();
+  await refreshStatus();
+  await loadJobs();
+  pollTimer = setInterval(refreshStatus, 10000); // poll every 10s
+};
+
+// ── Tag management ────────────────────────────────────────────────────────────
+function renderTags() {
+  document.getElementById('kw-tags').innerHTML =
+    kws.map((k,i) => `<div class="tag" onclick="removeKw(${i})">${k} ×</div>`).join('');
+  document.getElementById('loc-tags').innerHTML =
+    locs.map((l,i) => `<div class="tag" onclick="removeLoc(${i})">${l} ×</div>`).join('');
+}
+function removeKw(i) { kws.splice(i,1); renderTags(); }
+function removeLoc(i) { locs.splice(i,1); renderTags(); }
+function setupInputs() {
+  document.getElementById('kw-input').addEventListener('keydown', e => {
+    if (e.key==='Enter' && e.target.value.trim()) { kws.push(e.target.value.trim()); e.target.value=''; renderTags(); }
+  });
+  document.getElementById('loc-input').addEventListener('keydown', e => {
+    if (e.key==='Enter' && e.target.value.trim()) { locs.push(e.target.value.trim()); e.target.value=''; renderTags(); }
+  });
+}
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function api(path, opts={}) {
+  try {
+    const r = await fetch(API+path, { headers:{'Content-Type':'application/json'}, ...opts });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    return r.json();
+  } catch(e) {
+    addLog('Backend error: '+e.message, 'err');
+    throw e;
+  }
+}
+
+// ── Load config from backend ──────────────────────────────────────────────────
+async function loadConfig() {
+  try {
+    const cfg = await api('/config');
+    if (cfg.keywords?.length) kws = cfg.keywords;
+    if (cfg.locations?.length) locs = cfg.locations;
+    renderTags();
+    document.getElementById('cfg-emailto').value = cfg.email_to || '';
+    document.getElementById('cfg-smtpuser').value = cfg.smtp_user || '';
+    document.getElementById('cfg-interval').value = cfg.interval_hours || '2';
+    document.getElementById('cfg-exp').value = cfg.experience || '1 year';
+    if (cfg.remote_only === 'true') document.getElementById('tog-remote').classList.add('on');
+    if (cfg.include_internships !== 'false') document.getElementById('tog-intern').classList.add('on');
+  } catch(e) {
+    addLog('Could not reach backend — is it running? (python main.py)', 'err');
+  }
+}
+
+// ── Save config ───────────────────────────────────────────────────────────────
+async function saveConfig() {
+  const body = {
+    keywords: kws,
+    locations: locs,
+    experience: document.getElementById('cfg-exp').value,
+    interval_hours: parseFloat(document.getElementById('cfg-interval').value),
+    remote_only: document.getElementById('tog-remote').classList.contains('on'),
+    include_internships: document.getElementById('tog-intern').classList.contains('on'),
+  };
+  const apiKey = document.getElementById('cfg-apikey').value.trim();
+  const emailTo = document.getElementById('cfg-emailto').value.trim();
+  const smtpUser = document.getElementById('cfg-smtpuser').value.trim();
+  const smtpPass = document.getElementById('cfg-smtppass').value.trim();
+  if (apiKey) body.anthropic_api_key = apiKey;
+  if (emailTo) body.email_to = emailTo;
+  if (smtpUser) body.smtp_user = smtpUser;
+  if (smtpPass) body.smtp_pass = smtpPass;
+  await api('/config', { method:'POST', body:JSON.stringify(body) });
+  addLog('Config saved ✓', 'ok');
+  intervalSec = body.interval_hours * 3600;
+}
+
+// ── Agent control ─────────────────────────────────────────────────────────────
+async function startAgent() {
+  await saveConfig();
+  const data = await api('/agent/start', { method:'POST' });
+  addLog('Agent started ✓  Next: '+data.next_run, 'ok');
+  document.getElementById('start-btn').style.display = 'none';
+  document.getElementById('stop-btn').style.display = 'inline-flex';
+  document.getElementById('timer-card').style.display = 'block';
+  updateStatusPill(true);
+  if (data.next_run) startCountdown(new Date(data.next_run).getTime());
+}
+
+async function stopAgent() {
+  await api('/agent/stop', { method:'POST' });
+  addLog('Agent stopped', 'err');
+  document.getElementById('start-btn').style.display = 'inline-flex';
+  document.getElementById('stop-btn').style.display = 'none';
+  document.getElementById('timer-card').style.display = 'none';
+  clearInterval(countdownTimer);
+  updateStatusPill(false);
+}
+
+async function runNow() {
+  await saveConfig();
+  document.getElementById('search-spin').style.display = 'block';
+  addLog('Manual search triggered...', 'info');
+  await api('/agent/run-now', { method:'POST' });
+  addLog('Search running in background — refresh jobs in ~30s', 'info');
+  setTimeout(async () => {
+    await loadJobs();
+    await refreshStatus();
+    document.getElementById('search-spin').style.display = 'none';
+  }, 35000);
+}
+
+// ── Poll status ───────────────────────────────────────────────────────────────
+async function refreshStatus() {
+  try {
+    const s = await api('/status');
+    document.getElementById('s-jobs').textContent = s.total_jobs;
+    document.getElementById('s-emails').textContent = s.emails_sent;
+    document.getElementById('s-runs').textContent = s.total_runs;
+    updateStatusPill(s.agent_enabled);
+    if (s.agent_enabled) {
+      document.getElementById('start-btn').style.display = 'none';
+      document.getElementById('stop-btn').style.display = 'inline-flex';
+      document.getElementById('timer-card').style.display = 'block';
+      if (s.next_run) {
+        const nxt = new Date(s.next_run).getTime();
+        if (!nextRunAt || Math.abs(nxt - nextRunAt) > 5000) startCountdown(nxt);
+        document.getElementById('next-label').textContent = 'Next: '+new Date(s.next_run).toLocaleString('en-IN');
+      }
+    }
+    await loadRuns();
+  } catch(_) {}
+}
+
+function updateStatusPill(running) {
+  const el = document.getElementById('status-pill');
+  el.className = running ? 'pill pill-run' : 'pill pill-idle';
+  el.textContent = running ? '● Running' : '● Idle';
+}
+
+// ── Countdown ─────────────────────────────────────────────────────────────────
+function startCountdown(targetMs) {
+  nextRunAt = targetMs;
+  clearInterval(countdownTimer);
+  const total = targetMs - Date.now();
+  countdownTimer = setInterval(() => {
+    const left = Math.max(0, Math.floor((nextRunAt - Date.now()) / 1000));
+    const h = String(Math.floor(left/3600)).padStart(2,'0');
+    const m = String(Math.floor((left%3600)/60)).padStart(2,'0');
+    const s = String(left%60).padStart(2,'0');
+    document.getElementById('countdown').textContent = `${h}:${m}:${s}`;
+    const pct = Math.min(100, ((total - left*1000) / total * 100)).toFixed(1);
+    document.getElementById('bar').style.width = pct + '%';
+    if (left === 0) clearInterval(countdownTimer);
+  }, 500);
+}
+
+// ── Load jobs from backend ────────────────────────────────────────────────────
+async function loadJobs() {
+  try {
+    const data = await api('/jobs?limit=50');
+    renderJobs(data.jobs);
+  } catch(_) {}
+}
+
+function renderJobs(jobs) {
+  if (!jobs.length) return;
+  document.getElementById('empty-jobs').style.display = 'none';
+  document.getElementById('job-list').innerHTML = jobs.map(j => {
+    const skills = (j.skills||[]).slice(0,4).map(s=>`<span class="chip kw">${esc(s)}</span>`).join('');
+    const loc = j.location||'Remote';
+    const isRem = loc.toLowerCase().includes('remote');
+    return `<div class="job-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+        <div>
+          <div class="job-title">${esc(j.title)}</div>
+          <div class="job-co">${esc(j.company)} · Run #${j.run_id||'?'}</div>
+        </div>
+        <span class="fresh">🕐 ${esc(j.posted||'Recent')}</span>
+      </div>
+      <div class="chips">
+        <span class="chip ${isRem?'hot':''}">${esc(loc)}</span>
+        <span class="chip">${esc(j.job_type||'Full-time')}</span>
+        ${j.salary?`<span class="chip hot">💰 ${esc(j.salary)}</span>`:''}
+        ${skills}
+      </div>
+      ${j.description?`<p style="font-size:.8rem;color:var(--muted);margin-top:8px;line-height:1.6">${esc(j.description)}</p>`:''}
+      ${j.apply_link&&j.apply_link!=='null'?`<a href="${j.apply_link}" target="_blank" class="btn btn-s" style="margin-top:10px;padding:7px 14px;font-size:.78rem">Apply →</a>`:''}
+    </div>`;
+  }).join('');
+}
+
+// ── Load run history ──────────────────────────────────────────────────────────
+async function loadRuns() {
+  try {
+    const data = await api('/runs?limit=15');
+    const el = document.getElementById('run-list');
+    if (!data.runs.length) { el.innerHTML = '<div class="empty"><div class="empty-icon">📋</div>No runs yet</div>'; return; }
+    el.innerHTML = data.runs.map(r => {
+      const st = r.status==='success' ? '✅' : r.status==='running' ? '⏳' : '❌';
+      const t = r.started_at ? new Date(r.started_at).toLocaleString('en-IN') : '—';
+      return `<div class="run-row">
+        <span>${st} Run #${r.id} — ${t}</span>
+        <span style="color:var(--muted);font-size:.75rem">${r.jobs_found||0} jobs · ${r.email_sent?'📧 sent':'no email'}</span>
+      </div>`;
+    }).join('');
+  } catch(_) {}
+}
+
+// ── Clear jobs ────────────────────────────────────────────────────────────────
+async function clearJobs() {
+  if (!confirm('Delete all stored jobs?')) return;
+  await api('/jobs/clear', { method:'DELETE' });
+  document.getElementById('job-list').innerHTML = '';
+  document.getElementById('empty-jobs').style.display = 'block';
+  addLog('Jobs cleared', 'info');
+  refreshStatus();
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function tab(name, el) {
+  ['jobs','runs','log'].forEach(n => document.getElementById('pane-'+n).style.display='none');
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.getElementById('pane-'+name).style.display='block';
+  el.classList.add('on');
+  if (name==='runs') loadRuns();
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────────
+function addLog(msg, type='') {
+  const box = document.getElementById('log-box');
+  const t = new Date().toLocaleTimeString();
+  box.innerHTML += `<div class="le"><span class="lt">${t}</span><span class="lm ${type}">${msg}</span></div>`;
+  box.scrollTop = box.scrollHeight;
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>
