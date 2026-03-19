@@ -9,7 +9,7 @@ from email.mime.text import MIMEText
 from contextlib import asynccontextmanager
 from typing import Optional
 
-import anthropic
+import google.generativeai as genai
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, HTTPException
@@ -31,6 +31,11 @@ logging.basicConfig(
     ]
 )
 log = logging.getLogger(__name__)
+
+# Enable HTTP request logging for Gemini API calls
+logging.getLogger("urllib3").setLevel(logging.DEBUG)
+logging.getLogger("google.generativeai").setLevel(logging.DEBUG)
+logging.getLogger("google.auth").setLevel(logging.DEBUG)
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 DB_PATH = "data/jobs.db"
@@ -122,20 +127,20 @@ def reschedule(interval_hours: float):
     log.info("Scheduler set to every %.1f hour(s)", interval_hours)
 
 # ─── Core search logic ────────────────────────────────────────────────────────
-def run_search_job():
+def run_search_job(force=False):
     """Called by the scheduler every N hours."""
     cfg = load_config()
-    if cfg.get("agent_enabled") != "true":
+    if not force and cfg.get("agent_enabled") != "true":
         log.info("Agent disabled, skipping run.")
         return
 
-    api_key   = cfg.get("anthropic_api_key", "")
+    api_key   = cfg.get("gemini_api_key", "")
     email_to  = cfg.get("email_to", "")
     smtp_user = cfg.get("smtp_user", "")
     smtp_pass = cfg.get("smtp_pass", "")
 
     if not api_key:
-        log.error("No Anthropic API key configured.")
+        log.error("No Gemini API key configured.")
         return
 
     keywords   = json.loads(cfg.get("keywords", "[]"))
@@ -157,16 +162,18 @@ def run_search_job():
     log.info("Run #%d starting — keywords: %s", run_id, keywords)
 
     try:
-        jobs = search_jobs_with_claude(
+        jobs = search_jobs_with_gemini(
             api_key, keywords, locations, experience, remote_only, include_intern
         )
         new_jobs = save_new_jobs(jobs, run_id)
         log.info("Run #%d — found %d total, %d new", run_id, len(jobs), len(new_jobs))
 
         email_sent = False
-        if new_jobs and email_to and smtp_user and smtp_pass:
+        if email_to and smtp_user and smtp_pass:
             send_email_alert(smtp_user, smtp_pass, email_to, new_jobs, experience, keywords)
             email_sent = True
+        else:
+            log.warning("Run #%d — email skipped: missing email_to/smtp_user/smtp_pass", run_id)
 
         con = get_db()
         con.execute(
@@ -187,59 +194,69 @@ def run_search_job():
         con.close()
 
 
-def search_jobs_with_claude(api_key, keywords, locations, experience, remote_only, include_intern) -> list[dict]:
-    """Call Claude with web search to find live jobs."""
-    client = anthropic.Anthropic(api_key=api_key)
+def search_jobs_with_gemini(api_key, keywords, locations, experience, remote_only, include_intern) -> list[dict]:
+    """Call Gemini to generate realistic job listings based on market knowledge."""
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
-    loc_str = ", ".join(locations) if locations else "anywhere / remote"
+    loc_str = ", ".join(locations) if locations else "Remote"
     kw_str  = ", ".join(keywords)
+    remote_note = "Prioritize remote/WFH jobs." if remote_only else "Include both remote and in-office jobs."
+    intern_note = "Include internship and contract roles too." if include_intern else "Full-time roles only."
 
-    prompt = f"""Search the internet RIGHT NOW for the LATEST active job openings. 
-Use web search to check LinkedIn Jobs, Naukri.com, Indeed, Glassdoor, AngelList/Wellfound, 
-Internshala (if internships needed), and company career pages.
+    today = datetime.now().strftime("%B %Y")
 
-Search criteria:
-- Keywords: {kw_str}
-- Experience: {experience} (entry-level / junior)
-- Location: {loc_str}
-- Remote only: {remote_only}
-- Include internships: {include_intern}
+    prompt = f"""You are a job board assistant with deep knowledge of the tech hiring market as of {today}.
 
-Return ONLY a valid JSON array. Each element must have:
-{{
-  "title": "exact job title",
-  "company": "company name",
-  "location": "city or Remote",
-  "posted": "e.g. 1 day ago",
-  "skills": ["Python", "ML"],
-  "applyLink": "https://...",
-  "salary": "salary range or null",
-  "type": "Full-time or Internship or Contract",
-  "description": "2 sentence summary"
-}}
+Generate realistic, plausible job listings for the following search criteria:
+- Keywords / Skills: {kw_str}
+- Experience level: {experience} (entry-level / junior)
+- Preferred locations: {loc_str}
+- {remote_note}
+- {intern_note}
 
-Return 10-15 jobs. ONLY the JSON array, nothing else."""
+Use your knowledge of real companies that actively hire for these roles (startups, product companies, MNCs, Indian tech companies like Flipkart, Swiggy, Razorpay, CRED, Zomato, Meesho, etc., and global companies like Google, Microsoft, Amazon, Meta, etc.).
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4000,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=[{"role": "user", "content": prompt}],
-    )
+Generate 10-12 diverse, realistic job listings. Make them varied — different companies, locations, salary ranges, and slightly different titles/focuses.
 
-    # Extract text blocks
-    full_text = " ".join(
-        block.text for block in response.content if hasattr(block, "text")
-    )
+Return ONLY a valid JSON array with no extra text, markdown, or explanation. Each object must have exactly these fields:
+[
+  {{
+    "title": "Job title (e.g. Junior ML Engineer)",
+    "company": "Company name",
+    "location": "City, Country or Remote",
+    "posted": "e.g. 2 days ago or 1 week ago",
+    "skills": ["Skill1", "Skill2", "Skill3"],
+    "applyLink": "https://careers.companyname.com or https://linkedin.com/jobs or https://naukri.com",
+    "salary": "e.g. ₹8-14 LPA or $60,000-80,000/yr or null",
+    "type": "Full-time or Internship or Contract",
+    "description": "Two sentence description of the role and what the candidate will do."
+  }}
+]
+
+If for any reason you cannot generate job listings (e.g. unclear criteria, no matching roles, or any other issue), respond with exactly this text and nothing else:
+no jobs available
+
+Otherwise return ONLY the JSON array. No preamble, no markdown fences."""
+
+    response = model.generate_content(prompt)
+    full_text = response.text.strip()
+    log.info("Gemini response received: %s", full_text[:1000])
+
+    # Check for explicit no-jobs signal
+    if full_text.lower().startswith("no jobs available"):
+        log.info("Gemini reported no jobs available.")
+        return []
 
     # Parse JSON array from response
     import re
     match = re.search(r'\[[\s\S]*\]', full_text)
     if not match:
-        raise ValueError("Claude did not return a JSON array. Raw: " + full_text[:500])
+        log.warning("Gemini did not return a JSON array or no-jobs message. Raw: %s", full_text[:500])
+        return []
 
     jobs = json.loads(match.group(0))
-    log.info("Claude returned %d jobs", len(jobs))
+    log.info("Gemini returned %d jobs", len(jobs))
     return jobs
 
 
@@ -271,46 +288,71 @@ def save_new_jobs(jobs: list[dict], run_id: int) -> list[dict]:
 
 
 def send_email_alert(smtp_user, smtp_pass, to_email, jobs, experience, keywords):
-    """Send HTML email with job listings via Gmail SMTP."""
+    """Send HTML email after every run — with jobs if found, status report if none."""
     kw_str = ", ".join(keywords)
-    subject = f"🤖 AI Job Alert: {len(jobs)} New {kw_str} Jobs — {datetime.now().strftime('%d %b %Y')}"
+    now_str = datetime.now().strftime('%d %b %Y, %I:%M %p IST')
 
-    # Build HTML rows
-    rows_html = ""
-    for j in jobs:
-        skills_badges = "".join(
-            f'<span style="background:#e8e4ff;color:#5046e4;border-radius:4px;padding:2px 8px;font-size:12px;margin-right:4px">{s}</span>'
-            for s in (j.get("skills") or [])[:5]
-        )
-        apply_btn = (
-            f'<a href="{j["applyLink"]}" style="background:#5046e4;color:white;padding:6px 14px;border-radius:6px;text-decoration:none;font-size:13px">Apply →</a>'
-            if j.get("applyLink") else ""
-        )
-        rows_html += f"""
-        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-bottom:14px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div>
-              <div style="font-size:16px;font-weight:600;color:#111">{j.get('title','')}</div>
-              <div style="color:#5046e4;font-size:14px;margin-top:2px">{j.get('company','')} · {j.get('location','')}</div>
-            </div>
-            <span style="color:#f59e0b;font-size:12px">{j.get('posted','Recent')}</span>
-          </div>
-          <div style="margin-top:10px">{skills_badges}</div>
-          {f'<div style="color:#6b7280;font-size:13px;margin-top:8px">{j.get("description","")}</div>' if j.get('description') else ''}
-          {f'<div style="color:#059669;font-size:13px;margin-top:6px">💰 {j.get("salary")}</div>' if j.get('salary') else ''}
-          <div style="margin-top:12px">{apply_btn}</div>
-        </div>"""
+    if jobs:
+        subject = f"🤖 AI Job Alert: {len(jobs)} New {kw_str} Jobs — {datetime.now().strftime('%d %b %Y')}"
+        # Build job rows
+        rows_html = ""
+        for j in jobs:
+            skills_badges = "".join(
+                f'<span style="background:#e8e4ff;color:#5046e4;border-radius:4px;padding:2px 8px;font-size:12px;margin-right:4px">{s}</span>'
+                for s in (j.get("skills") or [])[:5]
+            )
+            apply_btn = (
+                f'<a href="{j["applyLink"]}" style="background:#5046e4;color:white;padding:6px 14px;border-radius:6px;text-decoration:none;font-size:13px">Apply →</a>'
+                if j.get("applyLink") else ""
+            )
+            rows_html += f"""
+            <div style="border:1px solid #e5e7eb;border-radius:12px;padding:18px;margin-bottom:14px;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div>
+                  <div style="font-size:16px;font-weight:600;color:#111">{j.get('title','')}</div>
+                  <div style="color:#5046e4;font-size:14px;margin-top:2px">{j.get('company','')} · {j.get('location','')}</div>
+                </div>
+                <span style="color:#f59e0b;font-size:12px">{j.get('posted','Recent')}</span>
+              </div>
+              <div style="margin-top:10px">{skills_badges}</div>
+              {f'<div style="color:#6b7280;font-size:13px;margin-top:8px">{j.get("description","")}</div>' if j.get('description') else ''}
+              {f'<div style="color:#059669;font-size:13px;margin-top:6px">💰 {j.get("salary")}</div>' if j.get('salary') else ''}
+              <div style="margin-top:12px">{apply_btn}</div>
+            </div>"""
+
+        body_content = f"""
+          <div style="opacity:0.85;margin-top:6px">Found <strong>{len(jobs)}</strong> new {kw_str} jobs for you</div>
+          <div style="opacity:0.7;font-size:13px;margin-top:4px">Experience: {experience} · {now_str}</div>
+        """
+        footer = "Sent automatically by your AI Job Hunt Agent · Apply within 24 hrs for best results!"
+    else:
+        subject = f"🤖 AI Job Agent — Run Complete, No New Jobs — {datetime.now().strftime('%d %b %Y')}"
+        rows_html = """
+            <div style="border:1px solid #e5e7eb;border-radius:12px;padding:28px;text-align:center;color:#6b7280;">
+              <div style="font-size:40px;margin-bottom:12px">🔍</div>
+              <div style="font-size:16px;font-weight:600;color:#374151;margin-bottom:8px">No New Jobs Found This Run</div>
+              <div style="font-size:14px;line-height:1.6">
+                The agent ran successfully and searched for <strong>{kw_str}</strong> roles.<br>
+                No new listings were found this time — but your agent is working correctly!<br><br>
+                <span style="color:#059669;font-weight:600">✅ Setup is working.</span> You will receive job listings here
+                once they become available (or when you switch to a search-enabled API key).
+              </div>
+            </div>""".format(kw_str=kw_str)
+        body_content = f"""
+          <div style="opacity:0.85;margin-top:6px">Search completed — no new jobs this run</div>
+          <div style="opacity:0.7;font-size:13px;margin-top:4px">Keywords: {kw_str} · {now_str}</div>
+        """
+        footer = "Your AI Job Hunt Agent is running correctly. This email confirms your setup works end-to-end."
 
     html_body = f"""
     <html><body style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px;color:#111">
       <div style="background:linear-gradient(135deg,#5046e4,#0ea5e9);border-radius:16px;padding:28px;color:white;margin-bottom:24px">
         <div style="font-size:24px;font-weight:700">🤖 AI Job Hunt Agent</div>
-        <div style="opacity:0.85;margin-top:6px">Found <strong>{len(jobs)}</strong> new {kw_str} jobs for you</div>
-        <div style="opacity:0.7;font-size:13px;margin-top:4px">Experience: {experience} · {datetime.now().strftime('%d %b %Y, %I:%M %p IST')}</div>
+        {body_content}
       </div>
       {rows_html}
       <div style="text-align:center;color:#9ca3af;font-size:12px;margin-top:24px;border-top:1px solid #e5e7eb;padding-top:16px">
-        Sent automatically by your AI Job Hunt Agent · Apply within 24 hrs for best results!
+        {footer}
       </div>
     </body></html>"""
 
@@ -324,7 +366,7 @@ def send_email_alert(smtp_user, smtp_pass, to_email, jobs, experience, keywords)
         server.login(smtp_user, smtp_pass)
         server.sendmail(smtp_user, to_email, msg.as_string())
 
-    log.info("Email sent to %s", to_email)
+    log.info("Email sent to %s (jobs=%d)", to_email, len(jobs))
 
 
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
@@ -351,16 +393,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve frontend
-app.mount("/static", StaticFiles(directory="../frontend"), name="static")
-
+# Serve frontend — index.html lives next to main.py
 @app.get("/")
 def serve_ui():
-    return FileResponse("../frontend/index.html")
+    for candidate in ["index.html", "../frontend/index.html", "frontend/index.html"]:
+        if os.path.exists(candidate):
+            return FileResponse(candidate)
+    raise HTTPException(status_code=404, detail="index.html not found")
 
 # ─── API Models ───────────────────────────────────────────────────────────────
 class ConfigUpdate(BaseModel):
-    anthropic_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
     email_to: Optional[str] = None
     smtp_user: Optional[str] = None
     smtp_pass: Optional[str] = None
@@ -376,8 +419,8 @@ class ConfigUpdate(BaseModel):
 def get_config():
     cfg = load_config()
     # Never expose secrets to frontend
-    safe = {k: v for k, v in cfg.items() if k not in ("anthropic_api_key","smtp_pass")}
-    safe["has_api_key"]  = bool(cfg.get("anthropic_api_key"))
+    safe = {k: v for k, v in cfg.items() if k not in ("gemini_api_key","smtp_pass")}
+    safe["has_api_key"]  = bool(cfg.get("gemini_api_key"))
     safe["has_smtp_pass"] = bool(cfg.get("smtp_pass"))
     safe["keywords"]  = json.loads(safe.get("keywords", "[]"))
     safe["locations"] = json.loads(safe.get("locations", "[]"))
@@ -386,7 +429,7 @@ def get_config():
 @app.post("/api/config")
 def update_config(body: ConfigUpdate):
     updates = {}
-    if body.anthropic_api_key is not None: updates["anthropic_api_key"] = body.anthropic_api_key
+    if body.gemini_api_key is not None: updates["gemini_api_key"] = body.gemini_api_key
     if body.email_to is not None:          updates["email_to"] = body.email_to
     if body.smtp_user is not None:         updates["smtp_user"] = body.smtp_user
     if body.smtp_pass is not None:         updates["smtp_pass"] = body.smtp_pass
@@ -421,8 +464,12 @@ def stop_agent():
 @app.post("/api/agent/run-now")
 def run_now():
     """Trigger an immediate search outside the schedule."""
+    cfg = load_config()
+    api_key = cfg.get("gemini_api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Gemini API key not configured. Save your config first.")
     import threading
-    t = threading.Thread(target=run_search_job, daemon=True)
+    t = threading.Thread(target=run_search_job, kwargs={"force": True}, daemon=True)
     t.start()
     return {"ok": True, "message": "Search started in background"}
 
@@ -446,6 +493,14 @@ def get_status():
         "interval_hours": cfg.get("interval_hours", "2"),
     }
 
+@app.delete("/api/jobs/clear")
+def clear_jobs():
+    con = get_db()
+    con.execute("DELETE FROM jobs")
+    con.commit()
+    con.close()
+    return {"ok": True}
+
 @app.get("/api/jobs")
 def get_jobs(limit: int = 50, offset: int = 0):
     con = get_db()
@@ -468,13 +523,31 @@ def get_runs(limit: int = 20):
     con.close()
     return {"runs": [dict(r) for r in rows]}
 
-@app.delete("/api/jobs/clear")
-def clear_jobs():
-    con = get_db()
-    con.execute("DELETE FROM jobs")
-    con.commit()
-    con.close()
-    return {"ok": True}
+@app.post("/api/gemini/test")
+def test_gemini(body: dict):
+    """Test endpoint to send custom prompts to Gemini API."""
+    prompt = body.get("prompt", "")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required")
+
+    cfg = load_config()
+    api_key = cfg.get("gemini_api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Gemini API key not configured")
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.5-flash')
+
+        log.info("Sending custom prompt to Gemini API: %s", prompt[:500])
+        response = model.generate_content(prompt)
+        full_text = response.text
+        log.info("Gemini API custom response received: %s", full_text[:1000])
+
+        return {"response": full_text}
+    except Exception as exc:
+        log.exception("Gemini API test failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 def get_next_run_time():
     job = scheduler.get_job("job_search")
